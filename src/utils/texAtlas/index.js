@@ -131,11 +131,10 @@ const texAtlas = { // singleton object
         return {bound, data: packedTextures }
     },
     async getMeta(format, sprites, outputName = "texture.png") {
-        const {data} = await this.render(sprites)
-        const previewImg = document.querySelector("#preview")
+        const { data, bound } = await this.render(sprites)
         const size = {
-            width: parseInt(previewImg.getAttribute("width")),
-            height: parseInt(previewImg.getAttribute("height"))
+            width: bound.width,
+            height: bound.height
         }
         const generateHash = (data, mapper = cur => cur) => data.reduce((output, cur) => {
             output[cur.name] = mapper(cur)
