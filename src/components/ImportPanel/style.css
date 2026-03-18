@@ -20,6 +20,37 @@
     display: none;
 } */
 
+.importBtn:hover {
+    background: #1890ff;
+    color: #fff;
+}
+
+.recoveryBtn {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 48px;
+    height: 48px;
+    border: 1px dashed #d9d9d9;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s;
+    background: #fff;
+    color: #fa8c16;
+    font-size: 24px;
+}
+
+.recoveryBtn:hover {
+    background: #fa8c16;
+    color: #fff;
+}
+
+.recoveryCanvasContainer {
+    margin-top: 16px;
+    position: relative;
+    user-select: none;
+}
+
 .importPanelItem {
     height: 80px;
     width: 80px;
