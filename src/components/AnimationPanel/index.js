@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react"
 import { Button, Upload, Space, Input, List, Card, Typography, message, Tag, Modal, InputNumber, Select, Divider } from "antd"
-import { UploadOutlined, DownloadOutlined, PlusOutlined, DeleteOutlined, SettingOutlined, EyeOutlined, EyeInvisibleOutlined } from "@ant-design/icons"
+import { UploadOutlined, DownloadOutlined, PlusOutlined, DeleteOutlined, SettingOutlined, EyeOutlined, EyeInvisibleOutlined, EditOutlined, CopyOutlined } from "@ant-design/icons"
 import styles from "./style.css"
 
 const { Text, Title } = Typography
@@ -26,6 +26,7 @@ const AnimationPanel = () => {
     const [maskColor, setMaskColor] = useState("#ff00ff") // Default magenta
     const [compZoom, setCompZoom] = useState(1)
     const [compShowGrid, setCompShowGrid] = useState(false)
+    const [editTargetName, setEditTargetName] = useState(null)
 
     const previewCanvasRef = useRef(null)
     const playbackCanvasRef = useRef(null)
@@ -85,18 +86,24 @@ const AnimationPanel = () => {
     }
 
     const getSpriteBounds = (sprite) => {
-        if (!sprite) return { w: 0, h: 0 }
-        if (!sprite.isComposite) return { w: sprite.w, h: sprite.h }
+        if (!sprite) return { w: 0, h: 0, minX: 0, minY: 0 }
+        if (!sprite.isComposite) return { w: sprite.w || 0, h: sprite.h || 0, minX: 0, minY: 0 }
+        
         const base = getSprite(sprite.baseSpriteName)
-        let { w, h } = getSpriteBounds(base)
+        let minX = 0, minY = 0, maxX = base ? base.w : 0, maxY = base ? base.h : 0
+        
         sprite.layers.forEach(layer => {
             if (layer.visible === false) return
             const ls = getSprite(layer.spriteName)
-            const lb = getSpriteBounds(ls)
-            w = Math.max(w, layer.x + lb.w)
-            h = Math.max(h, layer.y + lb.h)
+            if (ls) {
+                const lb = getSpriteBounds(ls)
+                minX = Math.min(minX, layer.x + lb.minX)
+                minY = Math.min(minY, layer.y + lb.minY)
+                maxX = Math.max(maxX, layer.x + lb.minX + lb.w)
+                maxY = Math.max(maxY, layer.y + lb.minY + lb.h)
+            }
         })
-        return { w, h }
+        return { w: maxX - minX, h: maxY - minY, minX, minY }
     }
 
     // Sprite Preview Logic
@@ -274,14 +281,52 @@ const AnimationPanel = () => {
             isMaskEnabled,
             maskColor
         }
-        setCompositeSprites([...compositeSprites, newComp])
+
+        if (editTargetName) {
+            setCompositeSprites(compositeSprites.map(s => s.name === editTargetName ? newComp : s))
+            message.success(`Composite sprite '${compName}' updated.`)
+        } else {
+            setCompositeSprites([...compositeSprites, newComp])
+            message.success(`Composite sprite '${compName}' created.`)
+        }
+
         setIsCompositeModalVisible(false)
         setCompName("")
         setCompBase(null)
         setCompLayers([])
         setIsMaskEnabled(false)
         setMaskColor("#ff00ff")
-        message.success(`Composite sprite '${compName}' created.`)
+        setEditTargetName(null)
+    }
+
+    const openCreateModal = () => {
+        setEditTargetName(null)
+        setCompName("")
+        setCompBase(sprites[0]?.name)
+        setCompLayers([])
+        setIsMaskEnabled(false)
+        setMaskColor("#ff00ff")
+        setIsCompositeModalVisible(true)
+    }
+
+    const handleEditComposite = (comp) => {
+        setEditTargetName(comp.name)
+        setCompName(comp.name)
+        setCompBase(comp.baseSpriteName)
+        setCompLayers([...comp.layers])
+        setIsMaskEnabled(comp.isMaskEnabled || false)
+        setMaskColor(comp.maskColor || "#ff00ff")
+        setIsCompositeModalVisible(true)
+    }
+
+    const handleCopyComposite = (comp) => {
+        const newName = `${comp.name}_copy`
+        const newComp = {
+            ...comp,
+            name: newName
+        }
+        setCompositeSprites([...compositeSprites, newComp])
+        message.success(`Composite sprite '${newName}' created by copy.`)
     }
 
     const addLayer = () => {
@@ -527,7 +572,7 @@ const AnimationPanel = () => {
                     <div className={styles.previewHeader}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
                             <Title level={5} style={{ margin: 0 }}>Available Sprites</Title>
-                            <Button size="small" icon={<SettingOutlined />} onClick={() => setIsCompositeModalVisible(true)}>
+                            <Button size="small" icon={<SettingOutlined />} onClick={openCreateModal}>
                                 Create Composite
                             </Button>
                         </div>
@@ -558,7 +603,11 @@ const AnimationPanel = () => {
                                                 </Button>
                                             ))}
                                             {item.isComposite && (
-                                                <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => deleteComposite(item.name)} />
+                                                <Space>
+                                                    <Button size="small" type="text" icon={<EditOutlined />} onClick={() => handleEditComposite(item)} />
+                                                    <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => handleCopyComposite(item)} />
+                                                    <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => deleteComposite(item.name)} />
+                                                </Space>
                                             )}
                                         </div>
                                     </Space>
@@ -702,11 +751,11 @@ const CompositePreview = ({ baseName, layers, getSprite, img, getSpriteBounds, d
             maskColor
         }
         
-        const { w, h } = getSpriteBounds(tempSprite)
+        const { w, h, minX, minY } = getSpriteBounds(tempSprite)
         if (w === 0 || h === 0) return
 
         const MAX_SIZE = 256
-        const s = Math.min(MAX_SIZE / w, MAX_SIZE / h, 1)
+        const s = Math.min(MAX_SIZE / Math.max(w, 1), MAX_SIZE / Math.max(h, 1), 1)
         setBaseScale(s)
         
         const finalScale = s * zoom
@@ -714,21 +763,22 @@ const CompositePreview = ({ baseName, layers, getSprite, img, getSpriteBounds, d
         canvas.height = h * finalScale
         ctx.clearRect(0, 0, canvas.width, canvas.height)
         
-        drawSpriteRecursive(ctx, tempSprite, 0, 0, finalScale, img, isMaskEnabled, maskColor)
+        // Offset drawing by -minX, -minY to keep everything in view
+        drawSpriteRecursive(ctx, tempSprite, -minX * finalScale, -minY * finalScale, finalScale, img, isMaskEnabled, maskColor)
 
-        // Draw selected layer highlight
         if (selectedLayerIdx !== -1 && layers[selectedLayerIdx]) {
             const layer = layers[selectedLayerIdx]
             const ls = getSprite(layer.spriteName)
             if (ls && layer.visible !== false) {
                 ctx.strokeStyle = "red"
                 ctx.lineWidth = 2
-                ctx.strokeRect(layer.x * finalScale, layer.y * finalScale, ls.w * finalScale, ls.h * finalScale)
+                ctx.strokeRect((layer.x - minX) * finalScale, (layer.y - minY) * finalScale, ls.w * finalScale, ls.h * finalScale)
             }
         }
 
         if (showGrid) {
-            ctx.strokeStyle = "rgba(0, 0, 0, 0.15)"
+            // ... grid drawing ...
+            ctx.strokeStyle = "rgba(0, 0, 0, 0.1)"
             ctx.lineWidth = 0.5
             ctx.beginPath()
             for (let x = 0; x <= w; x++) {
@@ -741,12 +791,15 @@ const CompositePreview = ({ baseName, layers, getSprite, img, getSpriteBounds, d
             }
             ctx.stroke()
 
-            ctx.strokeStyle = "rgba(255, 0, 0, 0.3)"
+            const originX = -minX * finalScale
+            const originY = -minY * finalScale
+            ctx.strokeStyle = "rgba(0, 100, 255, 0.5)"
+            ctx.lineWidth = 1
             ctx.beginPath()
-            ctx.moveTo(0, 0)
-            ctx.lineTo(w * finalScale, 0)
-            ctx.moveTo(0, 0)
-            ctx.lineTo(0, h * finalScale)
+            ctx.moveTo(originX, 0)
+            ctx.lineTo(originX, h * finalScale)
+            ctx.moveTo(0, originY)
+            ctx.lineTo(w * finalScale, originY)
             ctx.stroke()
         }
     }, [baseName, layers, img, getSprite, getSpriteBounds, drawSpriteRecursive, isMaskEnabled, maskColor, zoom, showGrid, selectedLayerIdx])
@@ -754,10 +807,11 @@ const CompositePreview = ({ baseName, layers, getSprite, img, getSpriteBounds, d
     const handleMouseDown = (e) => {
         const rect = canvasRef.current.getBoundingClientRect()
         const finalScale = baseScale * zoom
-        const mouseX = (e.clientX - rect.left) / finalScale
-        const mouseY = (e.clientY - rect.top) / finalScale
+        const { minX, minY } = getSpriteBounds({ isComposite: true, baseSpriteName: baseName, layers })
         
-        // Check layers in reverse order (top to bottom)
+        const mouseX = (e.clientX - rect.left) / finalScale + minX
+        const mouseY = (e.clientY - rect.top) / finalScale + minY
+        
         for (let i = layers.length - 1; i >= 0; i--) {
             const layer = layers[i]
             if (layer.visible === false) continue
@@ -776,8 +830,10 @@ const CompositePreview = ({ baseName, layers, getSprite, img, getSpriteBounds, d
         if (draggingIdx === -1) return
         const rect = canvasRef.current.getBoundingClientRect()
         const finalScale = baseScale * zoom
-        const mouseX = (e.clientX - rect.left) / finalScale
-        const mouseY = (e.clientY - rect.top) / finalScale
+        const { minX, minY } = getSpriteBounds({ isComposite: true, baseSpriteName: baseName, layers })
+        
+        const mouseX = (e.clientX - rect.left) / finalScale + minX
+        const mouseY = (e.clientY - rect.top) / finalScale + minY
         
         onUpdateLayer(draggingIdx, "x", Math.round(mouseX - dragOffset.x))
         onUpdateLayer(draggingIdx, "y", Math.round(mouseY - dragOffset.y))
