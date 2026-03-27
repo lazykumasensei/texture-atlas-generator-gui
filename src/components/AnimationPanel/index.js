@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react"
 import { Button, Upload, Space, Input, List, Card, Typography, message, Tag, Modal, InputNumber, Select, Divider } from "antd"
-import { UploadOutlined, DownloadOutlined, PlusOutlined, DeleteOutlined, SettingOutlined } from "@ant-design/icons"
+import { UploadOutlined, DownloadOutlined, PlusOutlined, DeleteOutlined, SettingOutlined, EyeOutlined, EyeInvisibleOutlined } from "@ant-design/icons"
 import styles from "./style.css"
 
 const { Text, Title } = Typography
@@ -22,26 +22,65 @@ const AnimationPanel = () => {
     const [compName, setCompName] = useState("")
     const [compBase, setCompBase] = useState(null)
     const [compLayers, setCompLayers] = useState([])
+    const [isMaskEnabled, setIsMaskEnabled] = useState(false)
+    const [maskColor, setMaskColor] = useState("#ff00ff") // Default magenta
+    const [compZoom, setCompZoom] = useState(1)
+    const [compShowGrid, setCompShowGrid] = useState(false)
 
     const previewCanvasRef = useRef(null)
     const playbackCanvasRef = useRef(null)
     const playbackTimerRef = useRef(null)
 
+    const hexToRgb = (hex) => {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+        return result ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+        } : { r: 0, g: 0, b: 0 }
+    }
+
     const getSprite = (name) => {
         return sprites.find(s => s.name === name) || compositeSprites.find(s => s.name === name)
     }
 
-    const drawSpriteRecursive = (ctx, sprite, offsetX, offsetY, scale, img) => {
+    const drawSpriteRecursive = (ctx, sprite, offsetX, offsetY, scale, img, globalMaskEnabled, globalMaskColor) => {
         if (!sprite || !img) return
         if (sprite.isComposite) {
             const base = getSprite(sprite.baseSpriteName)
-            drawSpriteRecursive(ctx, base, offsetX, offsetY, scale, img)
+            drawSpriteRecursive(ctx, base, offsetX, offsetY, scale, img, sprite.isMaskEnabled, sprite.maskColor)
             sprite.layers.forEach(layer => {
+                if (layer.visible === false) return
                 const ls = getSprite(layer.spriteName)
-                drawSpriteRecursive(ctx, ls, offsetX + layer.x * scale, offsetY + layer.y * scale, scale, img)
+                ctx.save()
+                ctx.globalAlpha = layer.opacity !== undefined ? layer.opacity : 1
+                drawSpriteRecursive(ctx, ls, offsetX + layer.x * scale, offsetY + layer.y * scale, scale, img, sprite.isMaskEnabled, sprite.maskColor)
+                ctx.restore()
             })
         } else {
-            ctx.drawImage(img, sprite.x, sprite.y, sprite.w, sprite.h, offsetX, offsetY, sprite.w * scale, sprite.h * scale)
+            if (globalMaskEnabled && globalMaskColor) {
+                const tempCanvas = document.createElement("canvas")
+                tempCanvas.width = sprite.w
+                tempCanvas.height = sprite.h
+                const tCtx = tempCanvas.getContext("2d")
+                tCtx.drawImage(img, sprite.x, sprite.y, sprite.w, sprite.h, 0, 0, sprite.w, sprite.h)
+                
+                const imageData = tCtx.getImageData(0, 0, sprite.w, sprite.h)
+                const data = imageData.data
+                const m = hexToRgb(globalMaskColor)
+                for (let i = 0; i < data.length; i += 4) {
+                    const dr = Math.abs(data[i] - m.r)
+                    const dg = Math.abs(data[i+1] - m.g)
+                    const db = Math.abs(data[i+2] - m.b)
+                    if (dr < 5 && dg < 5 && db < 5) {
+                        data[i+3] = 0
+                    }
+                }
+                tCtx.putImageData(imageData, 0, 0)
+                ctx.drawImage(tempCanvas, 0, 0, sprite.w, sprite.h, offsetX, offsetY, sprite.w * scale, sprite.h * scale)
+            } else {
+                ctx.drawImage(img, sprite.x, sprite.y, sprite.w, sprite.h, offsetX, offsetY, sprite.w * scale, sprite.h * scale)
+            }
         }
     }
 
@@ -51,6 +90,7 @@ const AnimationPanel = () => {
         const base = getSprite(sprite.baseSpriteName)
         let { w, h } = getSpriteBounds(base)
         sprite.layers.forEach(layer => {
+            if (layer.visible === false) return
             const ls = getSprite(layer.spriteName)
             const lb = getSpriteBounds(ls)
             w = Math.max(w, layer.x + lb.w)
@@ -230,18 +270,28 @@ const AnimationPanel = () => {
             name: compName,
             isComposite: true,
             baseSpriteName: compBase,
-            layers: compLayers
+            layers: compLayers,
+            isMaskEnabled,
+            maskColor
         }
         setCompositeSprites([...compositeSprites, newComp])
         setIsCompositeModalVisible(false)
         setCompName("")
         setCompBase(null)
         setCompLayers([])
+        setIsMaskEnabled(false)
+        setMaskColor("#ff00ff")
         message.success(`Composite sprite '${compName}' created.`)
     }
 
     const addLayer = () => {
-        setCompLayers([...compLayers, { spriteName: sprites[0]?.name, x: 0, y: 0 }])
+        setCompLayers([...compLayers, { 
+            spriteName: sprites[0]?.name, 
+            x: 0, 
+            y: 0, 
+            opacity: 1, 
+            visible: true 
+        }])
     }
 
     const removeLayer = (idx) => {
@@ -313,10 +363,10 @@ const AnimationPanel = () => {
                 visible={isCompositeModalVisible}
                 onOk={saveComposite}
                 onCancel={() => setIsCompositeModalVisible(false)}
-                width={800}
+                width={1000}
             >
                 <div style={{ display: 'flex', gap: 20 }}>
-                    <div style={{ flex: 1 }}>
+                    <div style={{ flex: 1, maxHeight: 600, overflowY: 'auto', paddingRight: 10 }}>
                         <Space direction="vertical" style={{ width: '100%' }} size="middle">
                             <div>
                                 <Text strong>Sprite Name</Text>
@@ -328,32 +378,114 @@ const AnimationPanel = () => {
                                     {sprites.map(s => <Option key={s.name} value={s.name}>{s.name}</Option>)}
                                 </Select>
                             </div>
-                            <Divider>Layers (Overlays)</Divider>
+                            
+                            <Divider>Mask Color (Make Transparent)</Divider>
+                            <Space align="center">
+                                <input 
+                                    type="checkbox" 
+                                    checked={isMaskEnabled} 
+                                    onChange={e => setIsMaskEnabled(e.target.checked)} 
+                                    style={{ width: 18, height: 18 }}
+                                />
+                                <Text>Enable Mask</Text>
+                                <input 
+                                    type="color" 
+                                    value={maskColor} 
+                                    onChange={e => setMaskColor(e.target.value)}
+                                    disabled={!isMaskEnabled}
+                                    style={{ width: 50, border: 'none', background: 'none' }}
+                                />
+                                <Input 
+                                    size="small"
+                                    value={maskColor} 
+                                    onChange={e => setMaskColor(e.target.value)}
+                                    disabled={!isMaskEnabled}
+                                    style={{ width: 80 }}
+                                />
+                            </Space>
+
+                            <Divider>Layers (Overlays) - Drag in Preview to Position</Divider>
                             {compLayers.map((layer, idx) => (
-                                <Card size="small" key={idx} style={{ marginBottom: 10 }}>
-                                    <Space align="center">
-                                        <Select 
-                                            style={{ width: 200 }} 
-                                            value={layer.spriteName} 
-                                            onChange={val => updateLayer(idx, "spriteName", val)}
-                                        >
-                                            {sprites.map(s => <Option key={s.name} value={s.name}>{s.name}</Option>)}
-                                        </Select>
-                                        <Text>X:</Text>
-                                        <InputNumber size="small" value={layer.x} onChange={val => updateLayer(idx, "x", val)} />
-                                        <Text>Y:</Text>
-                                        <InputNumber size="small" value={layer.y} onChange={val => updateLayer(idx, "y", val)} />
-                                        <Button type="text" danger icon={<DeleteOutlined />} onClick={() => removeLayer(idx)} />
+                                <Card 
+                                    size="small" 
+                                    key={idx} 
+                                    style={{ marginBottom: 10, borderLeft: '4px solid #1890ff', opacity: layer.visible ? 1 : 0.6 }}
+                                    extra={
+                                        <Space>
+                                            <Button 
+                                                type={layer.visible ? "primary" : "default"} 
+                                                size="small"
+                                                icon={layer.visible ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+                                                onClick={() => updateLayer(idx, "visible", !layer.visible)}
+                                            />
+                                            <Button type="text" danger icon={<DeleteOutlined />} onClick={() => removeLayer(idx)} />
+                                        </Space>
+                                    }
+                                >
+                                    <Space direction="vertical" style={{ width: '100%' }} size="small">
+                                        <Space>
+                                            <Select 
+                                                style={{ width: 150 }} 
+                                                value={layer.spriteName} 
+                                                onChange={val => updateLayer(idx, "spriteName", val)}
+                                            >
+                                                {sprites.map(s => <Option key={s.name} value={s.name}>{s.name}</Option>)}
+                                            </Select>
+                                            <Text>X:</Text>
+                                            <InputNumber size="small" style={{ width: 60 }} value={layer.x} onChange={val => updateLayer(idx, "x", val)} />
+                                            <Text>Y:</Text>
+                                            <InputNumber size="small" style={{ width: 60 }} value={layer.y} onChange={val => updateLayer(idx, "y", val)} />
+                                        </Space>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                            <Text type="secondary" style={{ fontSize: 12 }}>Opacity</Text>
+                                            <input 
+                                                type="range" 
+                                                min="0" 
+                                                max="1" 
+                                                step="0.05" 
+                                                value={layer.opacity} 
+                                                onChange={e => updateLayer(idx, "opacity", parseFloat(e.target.value))}
+                                                style={{ flex: 1 }}
+                                            />
+                                            <Text style={{ fontSize: 12, width: 35 }}>{Math.round(layer.opacity * 100)}%</Text>
+                                        </div>
                                     </Space>
                                 </Card>
                             ))}
                             <Button type="dashed" onClick={addLayer} block icon={<PlusOutlined />}>Add Layer</Button>
                         </Space>
                     </div>
-                    <div style={{ width: 300, background: '#fafafa', borderRadius: 8, padding: 20, textAlign: 'center' }}>
-                        <Title level={5}>Live Preview</Title>
-                        <div style={{ height: 256, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #eee', background: '#fff' }}>
-                            {/* Special preview for the modal */}
+                    <div style={{ width: 400, background: '#fafafa', borderRadius: 8, padding: 20, textAlign: 'center' }}>
+                        <Title level={5}>Live Preview (Drag Layers)</Title>
+                        
+                        <div style={{ marginBottom: 15, background: '#fff', padding: '10px 15px', borderRadius: 6, border: '1px solid #eee' }}>
+                            <Space direction="horizontal" style={{ width: '100%', justifyContent: 'space-between' }}>
+                                <Space>
+                                    <Text size="small">Zoom:</Text>
+                                    <input 
+                                        type="range" 
+                                        min="1" 
+                                        max="8" 
+                                        step="1" 
+                                        value={compZoom} 
+                                        onChange={e => setCompZoom(parseInt(e.target.value))} 
+                                        style={{ width: 80 }}
+                                    />
+                                    <Text strong>{compZoom}x</Text>
+                                </Space>
+                                <Space>
+                                    <input 
+                                        type="checkbox" 
+                                        checked={compShowGrid} 
+                                        onChange={e => setCompShowGrid(e.target.checked)} 
+                                        style={{ width: 16, height: 16 }}
+                                    />
+                                    <Text size="small">Show Grid</Text>
+                                </Space>
+                            </Space>
+                        </div>
+
+                        <div style={{ height: 350, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #eee', background: '#fff', cursor: 'move', position: 'relative', overflow: 'auto' }}>
                             <CompositePreview 
                                 baseName={compBase} 
                                 layers={compLayers} 
@@ -361,7 +493,15 @@ const AnimationPanel = () => {
                                 img={imgElement}
                                 getSpriteBounds={getSpriteBounds}
                                 drawSpriteRecursive={drawSpriteRecursive}
+                                onUpdateLayer={updateLayer}
+                                isMaskEnabled={isMaskEnabled}
+                                maskColor={maskColor}
+                                zoom={compZoom}
+                                showGrid={compShowGrid}
                             />
+                        </div>
+                        <div style={{ marginTop: 10 }}>
+                            <Text type="secondary" style={{ fontSize: 11 }}>Drag layers to move. Use Zoom for precision. Grid shows 1px units.</Text>
                         </div>
                     </div>
                 </div>
@@ -541,8 +681,12 @@ const AnimationPanel = () => {
     )
 }
 
-const CompositePreview = ({ baseName, layers, getSprite, img, getSpriteBounds, drawSpriteRecursive }) => {
+const CompositePreview = ({ baseName, layers, getSprite, img, getSpriteBounds, drawSpriteRecursive, onUpdateLayer, isMaskEnabled, maskColor, zoom = 1, showGrid = false }) => {
     const canvasRef = useRef(null)
+    const [draggingIdx, setDraggingIdx] = useState(-1)
+    const [selectedLayerIdx, setSelectedLayerIdx] = useState(-1)
+    const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
+    const [baseScale, setBaseScale] = useState(1)
 
     useEffect(() => {
         const canvas = canvasRef.current
@@ -553,22 +697,104 @@ const CompositePreview = ({ baseName, layers, getSprite, img, getSpriteBounds, d
         const tempSprite = {
             isComposite: true,
             baseSpriteName: baseName,
-            layers: layers
+            layers: layers,
+            isMaskEnabled,
+            maskColor
         }
         
         const { w, h } = getSpriteBounds(tempSprite)
         if (w === 0 || h === 0) return
 
         const MAX_SIZE = 256
-        const scale = Math.min(MAX_SIZE / w, MAX_SIZE / h, 1)
+        const s = Math.min(MAX_SIZE / w, MAX_SIZE / h, 1)
+        setBaseScale(s)
         
-        canvas.width = w * scale
-        canvas.height = h * scale
+        const finalScale = s * zoom
+        canvas.width = w * finalScale
+        canvas.height = h * finalScale
         ctx.clearRect(0, 0, canvas.width, canvas.height)
-        drawSpriteRecursive(ctx, tempSprite, 0, 0, scale, img)
-    }, [baseName, layers, img, getSprite, getSpriteBounds, drawSpriteRecursive])
+        
+        drawSpriteRecursive(ctx, tempSprite, 0, 0, finalScale, img, isMaskEnabled, maskColor)
 
-    return <canvas ref={canvasRef} style={{ maxWidth: '100%', maxHeight: '100%' }} />
+        // Draw selected layer highlight
+        if (selectedLayerIdx !== -1 && layers[selectedLayerIdx]) {
+            const layer = layers[selectedLayerIdx]
+            const ls = getSprite(layer.spriteName)
+            if (ls && layer.visible !== false) {
+                ctx.strokeStyle = "red"
+                ctx.lineWidth = 2
+                ctx.strokeRect(layer.x * finalScale, layer.y * finalScale, ls.w * finalScale, ls.h * finalScale)
+            }
+        }
+
+        if (showGrid) {
+            ctx.strokeStyle = "rgba(0, 0, 0, 0.15)"
+            ctx.lineWidth = 0.5
+            ctx.beginPath()
+            for (let x = 0; x <= w; x++) {
+                ctx.moveTo(x * finalScale, 0)
+                ctx.lineTo(x * finalScale, h * finalScale)
+            }
+            for (let y = 0; y <= h; y++) {
+                ctx.moveTo(0, y * finalScale)
+                ctx.lineTo(w * finalScale, y * finalScale)
+            }
+            ctx.stroke()
+
+            ctx.strokeStyle = "rgba(255, 0, 0, 0.3)"
+            ctx.beginPath()
+            ctx.moveTo(0, 0)
+            ctx.lineTo(w * finalScale, 0)
+            ctx.moveTo(0, 0)
+            ctx.lineTo(0, h * finalScale)
+            ctx.stroke()
+        }
+    }, [baseName, layers, img, getSprite, getSpriteBounds, drawSpriteRecursive, isMaskEnabled, maskColor, zoom, showGrid, selectedLayerIdx])
+
+    const handleMouseDown = (e) => {
+        const rect = canvasRef.current.getBoundingClientRect()
+        const finalScale = baseScale * zoom
+        const mouseX = (e.clientX - rect.left) / finalScale
+        const mouseY = (e.clientY - rect.top) / finalScale
+        
+        // Check layers in reverse order (top to bottom)
+        for (let i = layers.length - 1; i >= 0; i--) {
+            const layer = layers[i]
+            if (layer.visible === false) continue
+            const ls = getSprite(layer.spriteName)
+            if (ls && mouseX >= layer.x && mouseX <= layer.x + ls.w && mouseY >= layer.y && mouseY <= layer.y + ls.h) {
+                setDraggingIdx(i)
+                setSelectedLayerIdx(i)
+                setDragOffset({ x: mouseX - layer.x, y: mouseY - layer.y })
+                return
+            }
+        }
+        setSelectedLayerIdx(-1)
+    }
+
+    const handleMouseMove = (e) => {
+        if (draggingIdx === -1) return
+        const rect = canvasRef.current.getBoundingClientRect()
+        const finalScale = baseScale * zoom
+        const mouseX = (e.clientX - rect.left) / finalScale
+        const mouseY = (e.clientY - rect.top) / finalScale
+        
+        onUpdateLayer(draggingIdx, "x", Math.round(mouseX - dragOffset.x))
+        onUpdateLayer(draggingIdx, "y", Math.round(mouseY - dragOffset.y))
+    }
+
+    const handleMouseUp = () => setDraggingIdx(-1)
+
+    return (
+        <canvas 
+            ref={canvasRef} 
+            onMouseDown={handleMouseDown} 
+            onMouseMove={handleMouseMove} 
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            style={{ border: '1px solid #ddd' }} 
+        />
+    )
 }
 
 export default AnimationPanel
