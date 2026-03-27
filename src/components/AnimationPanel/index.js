@@ -29,6 +29,7 @@ const AnimationPanel = () => {
     const [editTargetName, setEditTargetName] = useState(null)
     const [selectedAnimIdx, setSelectedAnimIdx] = useState(-1)
     const [selectedFrameIdx, setSelectedFrameIdx] = useState(-1)
+    const [atlasXmlName, setAtlasXmlName] = useState("")
 
     const previewCanvasRef = useRef(null)
     const playbackCanvasRef = useRef(null)
@@ -129,20 +130,19 @@ const AnimationPanel = () => {
 
     // Animation Playback Logic
     useEffect(() => {
-        if (playingAnimIdx !== -1 && animations[playingAnimIdx] && imgElement && playbackCanvasRef.current) {
-            const anim = animations[playingAnimIdx]
-            const frames = anim.frames
-            if (frames.length === 0) return
+        if (playingAnimIdx === -1 || !imgElement || !playbackCanvasRef.current) return
+        const anim = animations[playingAnimIdx]
+        if (!anim || anim.frames.length === 0) return
 
-            const updateFrame = () => {
-                setCurrentFrameIdx(prev => (prev + 1) % frames.length)
-            }
-
-            const delay = anim.frameDuration || 200
-            playbackTimerRef.current = setInterval(updateFrame, delay)
-            return () => clearInterval(playbackTimerRef.current)
-        }
-    }, [playingAnimIdx, animations, imgElement])
+        const frame = anim.frames[currentFrameIdx]
+        const delay = (frame && frame.duration) || anim.frameDuration || 200
+        
+        const timer = setTimeout(() => {
+            setCurrentFrameIdx(prev => (prev + 1) % anim.frames.length)
+        }, delay)
+        
+        return () => clearTimeout(timer)
+    }, [playingAnimIdx, currentFrameIdx, animations, imgElement])
 
     useEffect(() => {
         let frameName = null
@@ -213,11 +213,16 @@ const AnimationPanel = () => {
     }
 
     const handleXmlUpload = (file) => {
+        setAtlasXmlName(file.name)
         const reader = new FileReader()
         reader.onload = (e) => {
             try {
                 const parser = new DOMParser()
                 const xmlDoc = parser.parseFromString(e.target.result, "text/xml")
+                
+                // Parse Atlas Name if exists
+                const atlasNode = xmlDoc.getElementsByTagName("atlas")[0]
+                if (atlasNode) setAtlasXmlName(atlasNode.getAttribute("name"))
                 
                 // Parse Sprites
                 const spriteNodes = xmlDoc.getElementsByTagName("sprite")
@@ -316,14 +321,14 @@ const AnimationPanel = () => {
     const updateAnimTiming = (idx, field, value) => {
         const newAnims = [...animations]
         const anim = newAnims[idx]
-        const numFrames = anim.frames.length || 1
-        
-        if (field === "totalDuration") {
-            anim.totalDuration = value
-            anim.frameDuration = Math.round(value / numFrames)
-        } else {
+        if (field === "frameDuration") {
             anim.frameDuration = value
-            anim.totalDuration = value * numFrames
+            anim.frames.forEach(f => f.duration = value)
+            anim.totalDuration = value * anim.frames.length
+        } else {
+            anim.totalDuration = value
+            const numFrames = anim.frames.length || 1
+            anim.frameDuration = Math.round(value / numFrames)
         }
         setAnimations(newAnims)
     }
@@ -331,8 +336,8 @@ const AnimationPanel = () => {
     const addFrameToAnim = (animIndex, spriteName) => {
         const newAnims = [...animations]
         const anim = newAnims[animIndex]
-        anim.frames.push({ spriteName, x: 0, y: 0 })
-        anim.totalDuration = anim.frameDuration * anim.frames.length
+        anim.frames.push({ spriteName, x: 0, y: 0, duration: anim.frameDuration })
+        anim.totalDuration = anim.frames.reduce((sum, f) => sum + (f.duration || 0), 0)
         setAnimations(newAnims)
     }
 
@@ -340,7 +345,7 @@ const AnimationPanel = () => {
         const newAnims = [...animations]
         const anim = newAnims[animIndex]
         anim.frames.splice(frameIndex, 1)
-        anim.totalDuration = anim.frameDuration * (anim.frames.length || 1)
+        anim.totalDuration = anim.frames.reduce((sum, f) => sum + (f.duration || 0), 0)
         if (selectedAnimIdx === animIndex && selectedFrameIdx === frameIndex) {
             setSelectedFrameIdx(-1)
         }
@@ -350,13 +355,16 @@ const AnimationPanel = () => {
     const updateFrameOffset = (animIndex, frameIndex, field, value) => {
         const newAnims = [...animations]
         newAnims[animIndex].frames[frameIndex][field] = value
+        if (field === "duration") {
+            newAnims[animIndex].totalDuration = newAnims[animIndex].frames.reduce((sum, f) => sum + (f.duration || 0), 0)
+        }
         setAnimations(newAnims)
     }
 
     const selectFrame = (animIdx, frameIdx) => {
         setSelectedAnimIdx(animIdx)
         setSelectedFrameIdx(frameIdx)
-        setPlayingAnimIdx(-1) // Stop playback when selecting a frame
+        setPlayingAnimIdx(-1) 
     }
 
     const saveComposite = () => {
@@ -455,13 +463,17 @@ const AnimationPanel = () => {
         }
         
         let xmlContent = '<?xml version="1.0" encoding="UTF-8"?>\n<animations>\n'
+        if (atlasXmlName) {
+            xmlContent += `  <atlas name="${atlasXmlName}" />\n`
+        }
         animations.forEach(anim => {
             xmlContent += `  <animation name="${anim.name}" totalDuration="${anim.totalDuration}" frameDuration="${anim.frameDuration}">\n`
             anim.frames.forEach(frame => {
                 const spriteName = typeof frame === 'string' ? frame : frame.spriteName
                 const x = frame.x || 0
                 const y = frame.y || 0
-                xmlContent += `    <frame n="${spriteName}" x="${x}" y="${y}" />\n`
+                const d = frame.duration || 200
+                xmlContent += `    <frame n="${spriteName}" x="${x}" y="${y}" d="${d}" />\n`
             })
             xmlContent += `  </animation>\n`
         })
@@ -837,6 +849,13 @@ const AnimationPanel = () => {
                                                         style={{ width: 55 }} 
                                                         value={frame.y || 0} 
                                                         onChange={val => updateFrameOffset(animIdx, frameIdx, "y", val)} 
+                                                    />
+                                                    <Text size="small" type="secondary">Dur:</Text>
+                                                    <InputNumber 
+                                                        size="small" 
+                                                        style={{ width: 60 }} 
+                                                        value={frame.duration || 0} 
+                                                        onChange={val => updateFrameOffset(animIdx, frameIdx, "duration", val)} 
                                                     />
                                                     <Button 
                                                         size="small" 
