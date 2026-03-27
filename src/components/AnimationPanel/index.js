@@ -27,6 +27,8 @@ const AnimationPanel = () => {
     const [compZoom, setCompZoom] = useState(1)
     const [compShowGrid, setCompShowGrid] = useState(false)
     const [editTargetName, setEditTargetName] = useState(null)
+    const [selectedAnimIdx, setSelectedAnimIdx] = useState(-1)
+    const [selectedFrameIdx, setSelectedFrameIdx] = useState(-1)
 
     const previewCanvasRef = useRef(null)
     const playbackCanvasRef = useRef(null)
@@ -143,26 +145,49 @@ const AnimationPanel = () => {
     }, [playingAnimIdx, animations, imgElement])
 
     useEffect(() => {
-        if (playingAnimIdx !== -1 && animations[playingAnimIdx] && imgElement && playbackCanvasRef.current) {
-            const frameName = animations[playingAnimIdx].frames[currentFrameIdx]
+        let frameName = null
+        let frameOffset = { x: 0, y: 0 }
+
+        if (playingAnimIdx !== -1 && animations[playingAnimIdx]) {
+            const anim = animations[playingAnimIdx]
+            const frame = anim.frames[currentFrameIdx]
+            if (frame) {
+                frameName = typeof frame === 'string' ? frame : frame.spriteName
+                frameOffset = { x: frame.x || 0, y: frame.y || 0 }
+            }
+        } else if (selectedAnimIdx !== -1 && selectedFrameIdx !== -1) {
+            // Show selected frame when not playing
+            const anim = animations[selectedAnimIdx]
+            const frame = anim.frames[selectedFrameIdx]
+            if (frame) {
+                frameName = typeof frame === 'string' ? frame : frame.spriteName
+                frameOffset = { x: frame.x || 0, y: frame.y || 0 }
+            }
+        }
+
+        if (frameName && imgElement && playbackCanvasRef.current) {
             const sprite = getSprite(frameName)
             if (sprite) {
                 const canvas = playbackCanvasRef.current
                 const ctx = canvas.getContext("2d")
-                const { w, h } = getSpriteBounds(sprite)
+                const bounds = getSpriteBounds(sprite)
+                const { w, h, minX, minY } = bounds
 
                 const MAX_SIZE = 256
-                const scale = Math.min(MAX_SIZE / w, MAX_SIZE / h, 1)
-                const targetWidth = w * scale
-                const targetHeight = h * scale
-
-                canvas.width = targetWidth
-                canvas.height = targetHeight
-                ctx.clearRect(0, 0, targetWidth, targetHeight)
-                drawSpriteRecursive(ctx, sprite, 0, 0, scale, imgElement)
+                const scale = Math.min(MAX_SIZE / Math.max(w, 1), MAX_SIZE / Math.max(h, 1), 1)
+                
+                canvas.width = MAX_SIZE
+                canvas.height = MAX_SIZE
+                ctx.clearRect(0, 0, MAX_SIZE, MAX_SIZE)
+                
+                // Base centered position + user offset
+                const drawX = (MAX_SIZE - w * scale) / 2 - minX * scale + frameOffset.x * scale
+                const drawY = (MAX_SIZE - h * scale) / 2 - minY * scale + frameOffset.y * scale
+                
+                drawSpriteRecursive(ctx, sprite, drawX, drawY, scale, imgElement)
             }
         }
-    }, [currentFrameIdx, playingAnimIdx, animations, sprites, compositeSprites, imgElement])
+    }, [currentFrameIdx, playingAnimIdx, selectedAnimIdx, selectedFrameIdx, animations, sprites, compositeSprites, imgElement])
 
     const togglePlayback = (idx) => {
         if (playingAnimIdx === idx) {
@@ -193,6 +218,8 @@ const AnimationPanel = () => {
             try {
                 const parser = new DOMParser()
                 const xmlDoc = parser.parseFromString(e.target.result, "text/xml")
+                
+                // Parse Sprites
                 const spriteNodes = xmlDoc.getElementsByTagName("sprite")
                 const parsedSprites = []
                 for (let i = 0; i < spriteNodes.length; i++) {
@@ -205,12 +232,61 @@ const AnimationPanel = () => {
                         h: parseInt(node.getAttribute("h")),
                     })
                 }
-                if (parsedSprites.length === 0) {
-                    message.error("No sprites found in XML. Make sure it's the correct format.")
-                } else {
-                    setSprites(parsedSprites)
-                    message.success(`${parsedSprites.length} sprites loaded.`)
+                if (parsedSprites.length > 0) setSprites(parsedSprites)
+
+                // Parse Animations
+                const animNodes = xmlDoc.getElementsByTagName("animation")
+                const parsedAnims = []
+                for (let i = 0; i < animNodes.length; i++) {
+                    const node = animNodes[i]
+                    const frames = []
+                    const frameNodes = node.getElementsByTagName("frame")
+                    for (let j = 0; j < frameNodes.length; j++) {
+                        const fn = frameNodes[j]
+                        frames.push({
+                            spriteName: fn.getAttribute("n"),
+                            x: parseInt(fn.getAttribute("x")) || 0,
+                            y: parseInt(fn.getAttribute("y")) || 0
+                        })
+                    }
+                    parsedAnims.push({
+                        name: node.getAttribute("name"),
+                        totalDuration: parseInt(node.getAttribute("totalDuration")) || 1000,
+                        frameDuration: parseInt(node.getAttribute("frameDuration")) || 200,
+                        frames
+                    })
                 }
+                if (parsedAnims.length > 0) setAnimations(parsedAnims)
+
+                // Parse Composite Sprites
+                const compositeNodes = xmlDoc.getElementsByTagName("composite")
+                const parsedComposites = []
+                for (let i = 0; i < compositeNodes.length; i++) {
+                    const node = compositeNodes[i]
+                    const layers = []
+                    const layerNodes = node.getElementsByTagName("layer")
+                    for (let j = 0; j < layerNodes.length; j++) {
+                        const ln = layerNodes[j]
+                        layers.push({
+                            spriteName: ln.getAttribute("n"),
+                            x: parseInt(ln.getAttribute("x")) || 0,
+                            y: parseInt(ln.getAttribute("y")) || 0,
+                            opacity: parseFloat(ln.getAttribute("opacity")) || 1,
+                            visible: ln.getAttribute("visible") !== "false"
+                        })
+                    }
+                    parsedComposites.push({
+                        name: node.getAttribute("name"),
+                        isComposite: true,
+                        baseSpriteName: node.getAttribute("base"),
+                        isMaskEnabled: node.getAttribute("maskEnabled") === "true",
+                        maskColor: node.getAttribute("maskColor") || "#ff00ff",
+                        layers
+                    })
+                }
+                if (parsedComposites.length > 0) setCompositeSprites(parsedComposites)
+
+                message.success("Data loaded from XML.")
             } catch (err) {
                 message.error("Failed to parse XML: " + err.message)
             }
@@ -255,7 +331,7 @@ const AnimationPanel = () => {
     const addFrameToAnim = (animIndex, spriteName) => {
         const newAnims = [...animations]
         const anim = newAnims[animIndex]
-        anim.frames.push(spriteName)
+        anim.frames.push({ spriteName, x: 0, y: 0 })
         anim.totalDuration = anim.frameDuration * anim.frames.length
         setAnimations(newAnims)
     }
@@ -265,7 +341,22 @@ const AnimationPanel = () => {
         const anim = newAnims[animIndex]
         anim.frames.splice(frameIndex, 1)
         anim.totalDuration = anim.frameDuration * (anim.frames.length || 1)
+        if (selectedAnimIdx === animIndex && selectedFrameIdx === frameIndex) {
+            setSelectedFrameIdx(-1)
+        }
         setAnimations(newAnims)
+    }
+
+    const updateFrameOffset = (animIndex, frameIndex, field, value) => {
+        const newAnims = [...animations]
+        newAnims[animIndex].frames[frameIndex][field] = value
+        setAnimations(newAnims)
+    }
+
+    const selectFrame = (animIdx, frameIdx) => {
+        setSelectedAnimIdx(animIdx)
+        setSelectedFrameIdx(frameIdx)
+        setPlayingAnimIdx(-1) // Stop playback when selecting a frame
     }
 
     const saveComposite = () => {
@@ -358,26 +449,29 @@ const AnimationPanel = () => {
     }
 
     const downloadAnimation = () => {
-        if (animations.length === 0) {
-            message.warning("No animations to export.")
+        if (animations.length === 0 && compositeSprites.length === 0) {
+            message.warning("No data to export.")
             return
         }
         
         let xmlContent = '<?xml version="1.0" encoding="UTF-8"?>\n<animations>\n'
         animations.forEach(anim => {
             xmlContent += `  <animation name="${anim.name}" totalDuration="${anim.totalDuration}" frameDuration="${anim.frameDuration}">\n`
-            anim.frames.forEach(frameName => {
-                xmlContent += `    <frame n="${frameName}" />\n`
+            anim.frames.forEach(frame => {
+                const spriteName = typeof frame === 'string' ? frame : frame.spriteName
+                const x = frame.x || 0
+                const y = frame.y || 0
+                xmlContent += `    <frame n="${spriteName}" x="${x}" y="${y}" />\n`
             })
             xmlContent += `  </animation>\n`
         })
-        // Also export composite sprite definitions
+        
         if (compositeSprites.length > 0) {
             xmlContent += '  <compositeSprites>\n'
             compositeSprites.forEach(cs => {
-                xmlContent += `    <composite name="${cs.name}" base="${cs.baseSpriteName}">\n`
+                xmlContent += `    <composite name="${cs.name}" base="${cs.baseSpriteName}" maskEnabled="${cs.isMaskEnabled}" maskColor="${cs.maskColor}">\n`
                 cs.layers.forEach(l => {
-                    xmlContent += `      <layer n="${l.spriteName}" x="${l.x}" y="${l.y}" />\n`
+                    xmlContent += `      <layer n="${l.spriteName}" x="${l.x}" y="${l.y}" opacity="${l.opacity}" visible="${l.visible}" />\n`
                 })
                 xmlContent += '    </composite>\n'
             })
@@ -633,16 +727,25 @@ const AnimationPanel = () => {
                         <div className={styles.previewBox}>
                             <Title level={5}>Animation Playback</Title>
                             <div className={styles.canvasWrapper}>
-                                {playingAnimIdx !== -1 ? (
+                                {(playingAnimIdx !== -1 || (selectedAnimIdx !== -1 && selectedFrameIdx !== -1)) ? (
                                     <div style={{ textAlign: 'center' }}>
                                         <canvas ref={playbackCanvasRef} className={styles.previewCanvas} />
                                         <div style={{ marginTop: 5 }}>
-                                            <Text strong>{animations[playingAnimIdx].name}</Text>
-                                            <Text type="secondary"> (Frame {currentFrameIdx + 1}/{animations[playingAnimIdx].frames.length})</Text>
+                                            {playingAnimIdx !== -1 ? (
+                                                <>
+                                                    <Text strong>{animations[playingAnimIdx].name}</Text>
+                                                    <Text type="secondary"> (Frame {currentFrameIdx + 1}/{animations[playingAnimIdx].frames.length})</Text>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Text strong>{animations[selectedAnimIdx].name}</Text>
+                                                    <Text type="secondary"> (Selected Frame {selectedFrameIdx + 1})</Text>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                 ) : (
-                                    <Text type="secondary">Play an animation to see it here</Text>
+                                    <Text type="secondary">Play an animation or select a frame to see it here</Text>
                                 )}
                             </div>
                         </div>
@@ -708,16 +811,46 @@ const AnimationPanel = () => {
                                         </div>
                                     </Space>
                                 </div>
-                                <div className={styles.framesContainer}>
-                                    {anim.frames.map((frameName, frameIdx) => (
-                                        <Tag 
+                                <div className={styles.framesVerticalContainer}>
+                                    {anim.frames.map((frame, frameIdx) => (
+                                        <div 
                                             key={frameIdx} 
-                                            closable 
-                                            onClose={() => removeFrameFromAnim(animIdx, frameIdx)}
-                                            style={{ marginBottom: 4 }}
+                                            className={`${styles.frameItem} ${selectedAnimIdx === animIdx && selectedFrameIdx === frameIdx ? styles.frameItemActive : ''}`}
+                                            onClick={() => selectFrame(animIdx, frameIdx)}
                                         >
-                                            {frameName}
-                                        </Tag>
+                                            <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                                                <Space>
+                                                    <Text strong style={{ minWidth: 20 }}>{frameIdx + 1}</Text>
+                                                    <Text>{typeof frame === 'string' ? frame : frame.spriteName}</Text>
+                                                </Space>
+                                                <Space onClick={e => e.stopPropagation()}>
+                                                    <Text size="small" type="secondary">X:</Text>
+                                                    <InputNumber 
+                                                        size="small" 
+                                                        style={{ width: 55 }} 
+                                                        value={frame.x || 0} 
+                                                        onChange={val => updateFrameOffset(animIdx, frameIdx, "x", val)} 
+                                                    />
+                                                    <Text size="small" type="secondary">Y:</Text>
+                                                    <InputNumber 
+                                                        size="small" 
+                                                        style={{ width: 55 }} 
+                                                        value={frame.y || 0} 
+                                                        onChange={val => updateFrameOffset(animIdx, frameIdx, "y", val)} 
+                                                    />
+                                                    <Button 
+                                                        size="small" 
+                                                        type="text" 
+                                                        danger 
+                                                        icon={<DeleteOutlined />} 
+                                                        onClick={(e) => {
+                                                            e.stopPropagation()
+                                                            removeFrameFromAnim(animIdx, frameIdx)
+                                                        }} 
+                                                    />
+                                                </Space>
+                                            </Space>
+                                        </div>
                                     ))}
                                     {anim.frames.length === 0 && <Text type="secondary">No frames added yet. Click '+' on a sprite to add.</Text>}
                                 </div>

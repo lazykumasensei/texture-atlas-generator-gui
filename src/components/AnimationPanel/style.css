@@ -115,21 +115,34 @@
     border-radius: 8px;
 }
 
-.framesContainer {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+.framesVerticalContainer {
+    max-height: 250px;
+    overflow-y: auto;
+    border: 1px solid #f0f0f0;
+    border-radius: 4px;
+    background: #fafafa;
     margin-top: 5px;
 }
 
-.frameTag {
-    background: #fafafa;
-    border: 1px solid #d9d9d9;
-    padding: 4px 8px;
-    border-radius: 4px;
-    display: flex;
-    align-items: center;
-    gap: 5px;
+.frameItem {
+    padding: 6px 10px;
+    border-bottom: 1px solid #f0f0f0;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: #fff;
+}
+
+.frameItem:last-child {
+    border-bottom: none;
+}
+
+.frameItem:hover {
+    background: #f0faff;
+}
+
+.frameItemActive {
+    background: #e6f7ff;
+    border-left: 3px solid #1890ff;
 }
 
 .previewCanvas {
