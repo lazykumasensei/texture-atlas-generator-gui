@@ -1,0 +1,143 @@
+.animationPanel {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.uploadSection {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    background: #fdfdfd;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #f0f0f0;
+}
+
+.contentSection {
+    display: flex;
+    gap: 20px;
+}
+
+.spriteListContainer {
+    width: 300px;
+    height: 600px;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #f0f0f0;
+    background: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.previewHeader {
+    padding: 10px;
+    border-bottom: 0px solid #f0f0f0; /* No line if empty? */
+    background: #fff;
+}
+
+.scrollableList {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 10px 10px 10px;
+}
+
+.spriteItem {
+    padding: 8px;
+    border-bottom: 1px solid #f9f9f9;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background 0.2s;
+}
+
+.spriteItem:hover {
+    background: #f0f7ff;
+}
+
+.spriteItemActive {
+    background: #e6f7ff;
+    border-left: 3px solid #1890ff;
+}
+
+.animationList {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    height: 600px;
+    overflow: hidden;
+}
+
+.previewContainer {
+    display: flex;
+    gap: 20px;
+    background: #fff;
+    padding: 15px;
+    border: 1px solid #f0f0f0;
+    border-radius: 8px;
+}
+
+.previewBox {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 250px;
+    border: 1px solid #fafafa;
+    background: #fdfdfd;
+    padding: 10px;
+    border-radius: 8px;
+}
+
+.canvasWrapper {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+}
+
+.scrollableAnimations {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    padding-right: 5px;
+}
+
+.animationCard {
+    background: #fff;
+    border: 1px solid #f0f0f0;
+    border-radius: 8px;
+}
+
+.framesContainer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 5px;
+}
+
+.frameTag {
+    background: #fafafa;
+    border: 1px solid #d9d9d9;
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.previewCanvas {
+    margin-top: 10px;
+    border: 1px solid #ddd;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    background-image: linear-gradient(45deg, #eee 25%, transparent 25%, transparent 75%, #eee 75%, #eee), 
+                      linear-gradient(45deg, #eee 25%, transparent 25%, transparent 75%, #eee 75%, #eee);
+    background-size: 20px 20px;
+    background-position: 0 0, 10px 10px;
+}
