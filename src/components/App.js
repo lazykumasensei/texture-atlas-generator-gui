@@ -7,6 +7,7 @@ import SidePanel from "./SidePanel"
 import ImportPanel from "./ImportPanel"
 import ClearBtn from "./ClearBtn"
 import AnimationPanel from "./AnimationPanel"
+import ScenePanel from "./ScenePanel"
 import styles from "./style.css"
 
 const  App = () => {
@@ -28,6 +29,11 @@ const  App = () => {
             key: 'animation',
             label: 'Sprite Animation',
             children: <AnimationPanel />,
+        },
+        {
+            key: 'scene',
+            label: 'Scene',
+            children: <ScenePanel />,
         },
     ]
 
