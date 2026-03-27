@@ -1,13 +1,15 @@
-import React, { useState, useCallback, useRef, useEffect } from "react"
-import { Button, Upload, Space, Input, List, Card, Typography, message, Tag } from "antd"
-import { UploadOutlined, DownloadOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons"
+import React, { useState, useRef, useEffect } from "react"
+import { Button, Upload, Space, Input, List, Card, Typography, message, Tag, Modal, InputNumber, Select, Divider } from "antd"
+import { UploadOutlined, DownloadOutlined, PlusOutlined, DeleteOutlined, SettingOutlined } from "@ant-design/icons"
 import styles from "./style.css"
 
 const { Text, Title } = Typography
+const { Option } = Select
 
 const AnimationPanel = () => {
     const [atlasImage, setAtlasImage] = useState(null)
     const [sprites, setSprites] = useState([])
+    const [compositeSprites, setCompositeSprites] = useState([])
     const [animations, setAnimations] = useState([])
     const [currentAnimName, setCurrentAnimName] = useState("")
     const [imgElement, setImgElement] = useState(null)
@@ -15,18 +17,55 @@ const AnimationPanel = () => {
     const [playingAnimIdx, setPlayingAnimIdx] = useState(-1)
     const [currentFrameIdx, setCurrentFrameIdx] = useState(0)
     
+    // Composite Creator State
+    const [isCompositeModalVisible, setIsCompositeModalVisible] = useState(false)
+    const [compName, setCompName] = useState("")
+    const [compBase, setCompBase] = useState(null)
+    const [compLayers, setCompLayers] = useState([])
+
     const previewCanvasRef = useRef(null)
     const playbackCanvasRef = useRef(null)
     const playbackTimerRef = useRef(null)
+
+    const getSprite = (name) => {
+        return sprites.find(s => s.name === name) || compositeSprites.find(s => s.name === name)
+    }
+
+    const drawSpriteRecursive = (ctx, sprite, offsetX, offsetY, scale, img) => {
+        if (!sprite || !img) return
+        if (sprite.isComposite) {
+            const base = getSprite(sprite.baseSpriteName)
+            drawSpriteRecursive(ctx, base, offsetX, offsetY, scale, img)
+            sprite.layers.forEach(layer => {
+                const ls = getSprite(layer.spriteName)
+                drawSpriteRecursive(ctx, ls, offsetX + layer.x * scale, offsetY + layer.y * scale, scale, img)
+            })
+        } else {
+            ctx.drawImage(img, sprite.x, sprite.y, sprite.w, sprite.h, offsetX, offsetY, sprite.w * scale, sprite.h * scale)
+        }
+    }
+
+    const getSpriteBounds = (sprite) => {
+        if (!sprite) return { w: 0, h: 0 }
+        if (!sprite.isComposite) return { w: sprite.w, h: sprite.h }
+        const base = getSprite(sprite.baseSpriteName)
+        let { w, h } = getSpriteBounds(base)
+        sprite.layers.forEach(layer => {
+            const ls = getSprite(layer.spriteName)
+            const lb = getSpriteBounds(ls)
+            w = Math.max(w, layer.x + lb.w)
+            h = Math.max(h, layer.y + lb.h)
+        })
+        return { w, h }
+    }
 
     // Sprite Preview Logic
     useEffect(() => {
         if (selectedSprite && imgElement && previewCanvasRef.current) {
             const canvas = previewCanvasRef.current
             const ctx = canvas.getContext("2d")
-            const { x, y, w, h } = selectedSprite
+            const { w, h } = getSpriteBounds(selectedSprite)
             
-            // Constrain to 256x256 while maintaining aspect ratio
             const MAX_SIZE = 256
             const scale = Math.min(MAX_SIZE / w, MAX_SIZE / h, 1)
             const targetWidth = w * scale
@@ -35,9 +74,9 @@ const AnimationPanel = () => {
             canvas.width = targetWidth
             canvas.height = targetHeight
             ctx.clearRect(0, 0, targetWidth, targetHeight)
-            ctx.drawImage(imgElement, x, y, w, h, 0, 0, targetWidth, targetHeight)
+            drawSpriteRecursive(ctx, selectedSprite, 0, 0, scale, imgElement)
         }
-    }, [selectedSprite, imgElement])
+    }, [selectedSprite, imgElement, compositeSprites])
 
     // Animation Playback Logic
     useEffect(() => {
@@ -59,13 +98,12 @@ const AnimationPanel = () => {
     useEffect(() => {
         if (playingAnimIdx !== -1 && animations[playingAnimIdx] && imgElement && playbackCanvasRef.current) {
             const frameName = animations[playingAnimIdx].frames[currentFrameIdx]
-            const sprite = sprites.find(s => s.name === frameName)
+            const sprite = getSprite(frameName)
             if (sprite) {
                 const canvas = playbackCanvasRef.current
                 const ctx = canvas.getContext("2d")
-                const { x, y, w, h } = sprite
+                const { w, h } = getSpriteBounds(sprite)
 
-                // Constrain to 256x256
                 const MAX_SIZE = 256
                 const scale = Math.min(MAX_SIZE / w, MAX_SIZE / h, 1)
                 const targetWidth = w * scale
@@ -74,10 +112,10 @@ const AnimationPanel = () => {
                 canvas.width = targetWidth
                 canvas.height = targetHeight
                 ctx.clearRect(0, 0, targetWidth, targetHeight)
-                ctx.drawImage(imgElement, x, y, w, h, 0, 0, targetWidth, targetHeight)
+                drawSpriteRecursive(ctx, sprite, 0, 0, scale, imgElement)
             }
         }
-    }, [currentFrameIdx, playingAnimIdx, animations, sprites, imgElement])
+    }, [currentFrameIdx, playingAnimIdx, animations, sprites, compositeSprites, imgElement])
 
     const togglePlayback = (idx) => {
         if (playingAnimIdx === idx) {
@@ -183,6 +221,40 @@ const AnimationPanel = () => {
         setAnimations(newAnims)
     }
 
+    const saveComposite = () => {
+        if (!compName || !compBase) {
+            message.warning("Please provide a name and a base sprite.")
+            return
+        }
+        const newComp = {
+            name: compName,
+            isComposite: true,
+            baseSpriteName: compBase,
+            layers: compLayers
+        }
+        setCompositeSprites([...compositeSprites, newComp])
+        setIsCompositeModalVisible(false)
+        setCompName("")
+        setCompBase(null)
+        setCompLayers([])
+        message.success(`Composite sprite '${compName}' created.`)
+    }
+
+    const addLayer = () => {
+        setCompLayers([...compLayers, { spriteName: sprites[0]?.name, x: 0, y: 0 }])
+    }
+
+    const removeLayer = (idx) => {
+        const newLayers = compLayers.filter((_, i) => i !== idx)
+        setCompLayers(newLayers)
+    }
+
+    const updateLayer = (idx, field, value) => {
+        const newLayers = [...compLayers]
+        newLayers[idx][field] = value
+        setCompLayers(newLayers)
+    }
+
     const deleteAnimation = (index) => {
         const newAnims = [...animations]
         newAnims.splice(index, 1)
@@ -204,6 +276,18 @@ const AnimationPanel = () => {
             })
             xmlContent += `  </animation>\n`
         })
+        // Also export composite sprite definitions
+        if (compositeSprites.length > 0) {
+            xmlContent += '  <compositeSprites>\n'
+            compositeSprites.forEach(cs => {
+                xmlContent += `    <composite name="${cs.name}" base="${cs.baseSpriteName}">\n`
+                cs.layers.forEach(l => {
+                    xmlContent += `      <layer n="${l.spriteName}" x="${l.x}" y="${l.y}" />\n`
+                })
+                xmlContent += '    </composite>\n'
+            })
+            xmlContent += '  </compositeSprites>\n'
+        }
         xmlContent += '</animations>'
 
         const blob = new Blob([xmlContent], { type: "application/xml" })
@@ -215,8 +299,74 @@ const AnimationPanel = () => {
         URL.revokeObjectURL(url)
     }
 
+    const deleteComposite = (name) => {
+        setCompositeSprites(compositeSprites.filter(s => s.name !== name))
+        if (selectedSprite?.name === name) setSelectedSprite(null)
+    }
+
+    const allAvailableSprites = [...sprites, ...compositeSprites]
+
     return (
         <div className={styles.animationPanel}>
+            <Modal
+                title="Create Composite Sprite"
+                visible={isCompositeModalVisible}
+                onOk={saveComposite}
+                onCancel={() => setIsCompositeModalVisible(false)}
+                width={800}
+            >
+                <div style={{ display: 'flex', gap: 20 }}>
+                    <div style={{ flex: 1 }}>
+                        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                            <div>
+                                <Text strong>Sprite Name</Text>
+                                <Input value={compName} onChange={e => setCompName(e.target.value)} placeholder="e.g. Player_Blink" />
+                            </div>
+                            <div>
+                                <Text strong>Base Sprite</Text>
+                                <Select style={{ width: '100%' }} value={compBase} onChange={setCompBase}>
+                                    {sprites.map(s => <Option key={s.name} value={s.name}>{s.name}</Option>)}
+                                </Select>
+                            </div>
+                            <Divider>Layers (Overlays)</Divider>
+                            {compLayers.map((layer, idx) => (
+                                <Card size="small" key={idx} style={{ marginBottom: 10 }}>
+                                    <Space align="center">
+                                        <Select 
+                                            style={{ width: 200 }} 
+                                            value={layer.spriteName} 
+                                            onChange={val => updateLayer(idx, "spriteName", val)}
+                                        >
+                                            {sprites.map(s => <Option key={s.name} value={s.name}>{s.name}</Option>)}
+                                        </Select>
+                                        <Text>X:</Text>
+                                        <InputNumber size="small" value={layer.x} onChange={val => updateLayer(idx, "x", val)} />
+                                        <Text>Y:</Text>
+                                        <InputNumber size="small" value={layer.y} onChange={val => updateLayer(idx, "y", val)} />
+                                        <Button type="text" danger icon={<DeleteOutlined />} onClick={() => removeLayer(idx)} />
+                                    </Space>
+                                </Card>
+                            ))}
+                            <Button type="dashed" onClick={addLayer} block icon={<PlusOutlined />}>Add Layer</Button>
+                        </Space>
+                    </div>
+                    <div style={{ width: 300, background: '#fafafa', borderRadius: 8, padding: 20, textAlign: 'center' }}>
+                        <Title level={5}>Live Preview</Title>
+                        <div style={{ height: 256, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #eee', background: '#fff' }}>
+                            {/* Special preview for the modal */}
+                            <CompositePreview 
+                                baseName={compBase} 
+                                layers={compLayers} 
+                                getSprite={getSprite}
+                                img={imgElement}
+                                getSpriteBounds={getSpriteBounds}
+                                drawSpriteRecursive={drawSpriteRecursive}
+                            />
+                        </div>
+                    </div>
+                </div>
+            </Modal>
+
             <div className={styles.uploadSection}>
                 <Space direction="vertical">
                     <Text strong>Step 1: Upload Atlas Texture & XML</Text>
@@ -237,12 +387,15 @@ const AnimationPanel = () => {
                     <div className={styles.previewHeader}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
                             <Title level={5} style={{ margin: 0 }}>Available Sprites</Title>
+                            <Button size="small" icon={<SettingOutlined />} onClick={() => setIsCompositeModalVisible(true)}>
+                                Create Composite
+                            </Button>
                         </div>
                     </div>
                     
                     <div className={styles.scrollableList}>
                         <List
-                            dataSource={sprites}
+                            dataSource={allAvailableSprites}
                             renderItem={item => (
                                 <div 
                                     className={`${styles.spriteItem} ${selectedSprite?.name === item.name ? styles.spriteItemActive : ''}`}
@@ -250,7 +403,9 @@ const AnimationPanel = () => {
                                 >
                                     <Text>{item.name}</Text>
                                     <Space onClick={e => e.stopPropagation()}>
-                                        <Text type="secondary">{item.w}x{item.h}</Text>
+                                        <Text type="secondary">
+                                            {item.isComposite ? "Composite" : `${item.w}x${item.h}`}
+                                        </Text>
                                         <div style={{ display: 'flex', gap: 4 }}>
                                             {animations.map((anim, idx) => (
                                                 <Button 
@@ -262,6 +417,9 @@ const AnimationPanel = () => {
                                                     + {anim.name}
                                                 </Button>
                                             ))}
+                                            {item.isComposite && (
+                                                <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => deleteComposite(item.name)} />
+                                            )}
                                         </div>
                                     </Space>
                                 </div>
@@ -381,6 +539,36 @@ const AnimationPanel = () => {
             </div>
         </div>
     )
+}
+
+const CompositePreview = ({ baseName, layers, getSprite, img, getSpriteBounds, drawSpriteRecursive }) => {
+    const canvasRef = useRef(null)
+
+    useEffect(() => {
+        const canvas = canvasRef.current
+        if (!canvas || !img) return
+        const ctx = canvas.getContext("2d")
+        
+        // Logical composite for preview
+        const tempSprite = {
+            isComposite: true,
+            baseSpriteName: baseName,
+            layers: layers
+        }
+        
+        const { w, h } = getSpriteBounds(tempSprite)
+        if (w === 0 || h === 0) return
+
+        const MAX_SIZE = 256
+        const scale = Math.min(MAX_SIZE / w, MAX_SIZE / h, 1)
+        
+        canvas.width = w * scale
+        canvas.height = h * scale
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        drawSpriteRecursive(ctx, tempSprite, 0, 0, scale, img)
+    }, [baseName, layers, img, getSprite, getSpriteBounds, drawSpriteRecursive])
+
+    return <canvas ref={canvasRef} style={{ maxWidth: '100%', maxHeight: '100%' }} />
 }
 
 export default AnimationPanel
